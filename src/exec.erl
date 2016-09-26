@@ -157,6 +157,7 @@
 -type cmd_options() :: [cmd_option()].
 -type cmd_option()  ::
       monitor
+    | {monitor, pid()}
     | sync
     | link    
     | {executable, string()}
@@ -762,10 +763,10 @@ wait_port_exit(Port) ->
 %%%---------------------------------------------------------------------
 
 -spec do_run(Cmd::any(), Options::cmd_options()) ->
-    {ok, pid(), ospid()} | {ok, [{stdout | stderr, [binary()]}]} | {error, any()}.
+    {ok, pid(), ospid()} | {ok, [{stdout | stderr | monitor, [binary()]}]} | {error, any()}.
 do_run(Cmd, Options) ->
     Link = case {proplists:get_bool(link,    Options),
-                 proplists:get_bool(monitor, Options)} of
+                 proplists:is_defined(monitor, Options)} of
            {true, _} -> link;
            {_, true} -> monitor;
            _         -> undefined
@@ -1010,6 +1011,13 @@ check_cmd_options([{Std, I, Opts}=H|T], Pid, State, PortOpts, OtherOpts)
         (Other) -> throw({error, ?FMT("Invalid ~w option: ~p", [Std, Other])})
     end, Opts),
     check_cmd_options(T, Pid, State, [H|PortOpts], OtherOpts);
+check_cmd_options([{Mon, I}=H|T], Pid, State, PortOpts, OtherOpts)
+        when Mon=:=monitor, I=/=Mon ->
+    if
+      is_pid(I) -> check_cmd_options(T, Pid, State, [Mon | PortOpts], [H|OtherOpts]);
+    true ->
+        throw({error, ?FMT("Invalid ~w option ~p", [Mon, I])})
+    end;
 check_cmd_options([{Std, I}=H|T], Pid, State, PortOpts, OtherOpts)
         when Std=:=stderr, I=/=Std; Std=:=stdout, I=/=Std ->
     if
