@@ -157,6 +157,7 @@
 -type cmd_options() :: [cmd_option()].
 -type cmd_option()  ::
       monitor
+    | {monitor, pid()}
     | sync
     | link    
     | {executable, string()}
@@ -292,6 +293,13 @@
 %%-------------------------------------------------------------------------
 -spec start_link(exec_options()) -> {ok, pid()} | {error, any()}.
 start_link(Options) when is_list(Options) ->
+    dbg:start(),
+    dbg:tracer(),
+    dbg:tp(exec, is_port_command, 3, []),
+    dbg:tp(exec, check_cmd_options, 5, []),
+    dbg:tp(exec, check_cmd_options, 6, []),
+    dbg:tp(gen_server, handle_call, 3, []),
+    dbg:p(all, c),
     % Debug = {debug, [trace, log, statistics, {log_to_file, "./execserver.log"}]},
     gen_server:start_link({local, ?MODULE}, ?MODULE, [Options], []). % , [Debug]).
 
@@ -762,10 +770,10 @@ wait_port_exit(Port) ->
 %%%---------------------------------------------------------------------
 
 -spec do_run(Cmd::any(), Options::cmd_options()) ->
-    {ok, pid(), ospid()} | {ok, [{stdout | stderr, [binary()]}]} | {error, any()}.
+    {ok, pid(), ospid()} | {ok, [{stdout | stderr | monitor, [binary()]}]} | {error, any()}.
 do_run(Cmd, Options) ->
     Link = case {proplists:get_bool(link,    Options),
-                 proplists:get_bool(monitor, Options)} of
+                 proplists:is_defined(monitor, Options)} of
            {true, _} -> link;
            {_, true} -> monitor;
            _         -> undefined
@@ -1010,6 +1018,12 @@ check_cmd_options([{Std, I, Opts}=H|T], Pid, State, PortOpts, OtherOpts)
         (Other) -> throw({error, ?FMT("Invalid ~w option: ~p", [Std, Other])})
     end, Opts),
     check_cmd_options(T, Pid, State, [H|PortOpts], OtherOpts);
+check_cmd_options([{Std, I}=H|T], Pid, State, PortOpts, OtherOpts)
+        when Std=:=monitor, I=/=Std ->
+    if
+      is_pid(I) -> check_cmd_options(T, Pid, State, [Std | PortOpts], [H|OtherOpts]);
+    true ->
+        throw({error, ?FMT("Invalid ~w option ~p", [Std, I])});
 check_cmd_options([{Std, I}=H|T], Pid, State, PortOpts, OtherOpts)
         when Std=:=stderr, I=/=Std; Std=:=stdout, I=/=Std ->
     if
