@@ -293,15 +293,8 @@
 %%-------------------------------------------------------------------------
 -spec start_link(exec_options()) -> {ok, pid()} | {error, any()}.
 start_link(Options) when is_list(Options) ->
-    dbg:start(),
-    dbg:tracer(),
-    dbg:tp(exec, is_port_command, 3, []),
-    dbg:tp(exec, check_cmd_options, 5, []),
-    dbg:tp(exec, check_cmd_options, 6, []),
-    dbg:tp(gen_server, handle_call, 3, []),
-    dbg:p(all, c),
     % Debug = {debug, [trace, log, statistics, {log_to_file, "./execserver.log"}]},
-    gen_server:start_link({local, ?MODULE}, ?MODULE, [Options], []). % , [Debug]).
+    gen_server:start_link({local, ?MODULE}, ?MODULE, [Options], []). %, [Debug]).
 
 %%-------------------------------------------------------------------------
 %% @equiv start_link/1
@@ -774,8 +767,8 @@ wait_port_exit(Port) ->
 do_run(Cmd, Options) ->
     Link = case {proplists:get_bool(link,    Options),
                  proplists:is_defined(monitor, Options)} of
-           {true, _} -> link;
            {_, true} -> monitor;
+           {true, _} -> link;
            _         -> undefined
            end,
     Sync = proplists:get_value(sync, Options, false),
@@ -812,7 +805,12 @@ maybe_add_monitor({ok, OsPid}, Pid, MonType, Sync, PidOpts, Debug) when is_integ
     % of creating a new OsPid process.
     % Spawn a light-weight process responsible for monitoring this OsPid
     Self = self(),
-    LWP  = spawn_link(fun() -> ospid_init(Pid, OsPid, MonType, Sync, Self, PidOpts, Debug) end),
+    P = proplists:get_value(monitor, PidOpts),
+    MonPid = if
+      is_pid(P) -> P;
+      true -> Pid
+    end,
+    LWP  = spawn_link(fun() -> ospid_init(MonPid, OsPid, MonType, Sync, Self, PidOpts, Debug) end),
     ets:insert(exec_mon, [{OsPid, LWP}, {LWP, OsPid}]),
     {ok, LWP, OsPid, Sync};
 maybe_add_monitor(Reply, _Pid, _MonType, _Sync, _PidOpts, _Debug) ->
@@ -1018,12 +1016,8 @@ check_cmd_options([{Std, I, Opts}=H|T], Pid, State, PortOpts, OtherOpts)
         (Other) -> throw({error, ?FMT("Invalid ~w option: ~p", [Std, Other])})
     end, Opts),
     check_cmd_options(T, Pid, State, [H|PortOpts], OtherOpts);
-check_cmd_options([{Std, I}=H|T], Pid, State, PortOpts, OtherOpts)
-        when Std=:=monitor, I=/=Std ->
-    if
-      is_pid(I) -> check_cmd_options(T, Pid, State, [Std | PortOpts], [H|OtherOpts]);
-    true ->
-        throw({error, ?FMT("Invalid ~w option ~p", [Std, I])});
+check_cmd_options([{monitor, I}=H|T], Pid, State, PortOpts, OtherOpts) when is_pid(I) ->
+    check_cmd_options(T, Pid, State, PortOpts, [H|OtherOpts]);
 check_cmd_options([{Std, I}=H|T], Pid, State, PortOpts, OtherOpts)
         when Std=:=stderr, I=/=Std; Std=:=stdout, I=/=Std ->
     if
