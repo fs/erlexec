@@ -963,10 +963,10 @@ int CmdOptions::ei_decode(ei::Serializer& ei, bool getCmd)
             m_shell=true;
         } else if ((sz = eis.decodeListSize()) > 0) {
             for (int i=0; i < sz; i++) {
-                if (eis.decodeString(s) < 0) {
-                    m_err << "badarg: invalid command argument #" << i;
-                    return -1;
-                }
+                /* if (eis.decodeString(s) < 0) { */
+                /*     m_err << "badarg: invalid command argument #" << i; */
+                /*     return -1; */
+                /* } */
                 m_cmd.push_back(s);
             }
             eis.decodeListEnd();
