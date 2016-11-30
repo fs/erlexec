@@ -1,3 +1,4 @@
+%%% vim:ts=4:sw=4:et
 %%%------------------------------------------------------------------------
 %%% File: $Id$
 %%%------------------------------------------------------------------------
@@ -43,7 +44,7 @@
 -export([
     start/0, start/1, start_link/1, run/2, run_link/2, manage/2, send/2,
     which_children/0, kill/2,       setpgid/2, stop/1, stop_and_wait/2,
-    ospid/1, pid/1,   status/1,     signal/1
+    ospid/1, pid/1,   status/1,     signal/1,  debug/1
 ]).
 
 %% Internal exports
@@ -289,6 +290,8 @@
 
 %%-------------------------------------------------------------------------
 %% @doc Supervised start an external program manager.
+%%      Note that the port program requires `SHELL' environment variable to
+%%      be set.
 %% @end
 %%-------------------------------------------------------------------------
 -spec start_link(exec_options()) -> {ok, pid()} | {error, any()}.
@@ -299,6 +302,8 @@ start_link(Options) when is_list(Options) ->
 %%-------------------------------------------------------------------------
 %% @equiv start_link/1
 %% @doc Start of an external program manager without supervision.
+%%      Note that the port program requires `SHELL' environment variable to
+%%      be set.
 %% @end
 %%-------------------------------------------------------------------------
 -spec start() -> {ok, pid()} | {error, any()}.
@@ -464,6 +469,14 @@ send(OsPid, Data)
     gen_server:call(?MODULE, {port, {send, OsPid, Data}}).
 
 %%-------------------------------------------------------------------------
+%% @doc Set debug level of the port process.
+%% @end
+%%-------------------------------------------------------------------------
+-spec debug(Level::integer()) -> {ok, OldLevel::integer()} | {error, timeout}.
+debug(Level) when is_integer(Level), Level >= 0, Level =< 10 ->
+    gen_server:call(?MODULE, {port, {debug, Level}}).
+
+%%-------------------------------------------------------------------------
 %% @doc Decode the program's exit_status.  If the program exited by signal
 %%      the function returns `{signal, Signal, Core}' where the `Signal'
 %%      is the signal number or atom, and `Core' indicates if the core file
@@ -541,9 +554,18 @@ default() ->
 
 %% @private
 default(portexe) -> 
-    % Get architecture (e.g. i386-linux)
-    Dir = filename:dirname(filename:dirname(code:which(?MODULE))),
-    filename:join([Dir, "priv", erlang:system_info(system_architecture), "exec-port"]);
+    % Retrieve the Priv directory
+    Priv = code:priv_dir(erlexec),
+    % Find all ports using wildcard for resiliency
+    Bin = case filelib:wildcard("*/exec-port", Priv) of
+        [Port] -> Port;
+        _      ->
+            Arch = erlang:system_info(system_architecture),
+            Tail = filename:join([Arch, "exec-port"]),
+            os:find_executable(filename:join([Priv, Tail]))
+    end,
+    % Join the priv/port path
+    filename:join([Priv, Bin]);
 default(Option) ->
     proplists:get_value(Option, default()).
 
@@ -777,7 +799,9 @@ do_run(Cmd, Options) ->
     {ok, Pid, OsPid, _Sync = true} ->
         wait_for_ospid_exit(OsPid, Pid, [], []);
     {ok, Pid, OsPid, _} ->
-        {ok, Pid, OsPid}
+        {ok, Pid, OsPid};
+    {error, not_found} ->
+        {error, not_found}
     end.
 
 wait_for_ospid_exit(OsPid, Pid, OutAcc, ErrAcc) ->
@@ -800,7 +824,7 @@ sync_res([], L)  -> [{stderr, lists:reverse(L)}];
 sync_res(LO, LE) -> [{stdout, lists:reverse(LO)} | sync_res([], LE)].
 
 %% Add a link for Pid to OsPid if requested.
-maybe_add_monitor({ok, OsPid}, Pid, MonType, Sync, PidOpts, Debug) when is_integer(OsPid) ->
+maybe_add_monitor({pid, OsPid}, Pid, MonType, Sync, PidOpts, Debug) when is_integer(OsPid) ->
     % This is a reply to a run/run_link command. The port program indicates
     % of creating a new OsPid process.
     % Spawn a light-weight process responsible for monitoring this OsPid
@@ -968,7 +992,9 @@ is_port_command({kill, Pid, Sig}, _Pid, _State) when is_pid(Pid),is_integer(Sig)
     case ets:lookup(exec_mon, Pid) of
     [{Pid, OsPid}]  -> {ok, {kill, OsPid, Sig}, undefined, undefined, []};
     []              -> throw({error, no_process})
-    end.
+    end;
+is_port_command({debug, Level}=T, _Pid, _State) when is_integer(Level),Level >= 0,Level =< 10 -> 
+    {ok, T, undefined, undefined, []}.
 
 check_cmd_options([monitor|T], Pid, State, PortOpts, OtherOpts) ->
     check_cmd_options(T, Pid, State, PortOpts, OtherOpts);
@@ -1081,7 +1107,7 @@ temp_file() ->
 
 exec_test_() ->
     {setup,
-        fun()    -> {ok, Pid} = exec:start([{debug, 1}]), Pid end,
+        fun()    -> {ok, Pid} = exec:start([{debug, 0}]), Pid end,
         fun(Pid) -> exit(Pid, kill) end,
         [
             ?tt(test_monitor()),
@@ -1099,6 +1125,9 @@ exec_test_() ->
             ?tt(test_pty())
         ]
     }.
+
+exec_run_many_test() ->
+    ?assertMatch({ok,[{io_ops,300},{success,300}]}, test_exec:run(300)).
 
 test_monitor() ->
     {ok, P, _} = exec:run("echo ok", [{stdout, null}, monitor]),
@@ -1118,11 +1147,16 @@ test_stdin() ->
     ?receiveMatch({'DOWN', _, process, P, normal}, 5000).
 
 test_stdin_eof() ->
-    {ok, P, I} = exec:run("tac", [stdin, stdout, monitor]),
-    [ok = exec:send(I, Data)
-     || Data <- [<<"foo\n">>, <<"bar\n">>, <<"baz\n">>, eof]],
-    ?receiveMatch({stdout,I,<<"baz\nbar\nfoo\n">>}, 3000),
-    ?receiveMatch({'DOWN', _, process, P, normal}, 5000).
+    case os:find_executable("tac") of
+    false ->
+        ok;
+    _ ->
+        {ok, P, I} = exec:run("tac", [stdin, stdout, monitor]),
+        [ok = exec:send(I, Data)
+         || Data <- [<<"foo\n">>, <<"bar\n">>, <<"baz\n">>, eof]],
+        ?receiveMatch({stdout,I,<<"baz\nbar\nfoo\n">>}, 3000),
+        ?receiveMatch({'DOWN', _, process, P, normal}, 5000)
+    end.
 
 test_std(Stream) ->
     Suffix = case Stream of
@@ -1197,9 +1231,13 @@ test_env() ->
         exec:run("echo $XXX", [stdout, {env, [{"XXX", "X"}]}, sync])).
 
 test_kill_timeout() ->
-    {ok, P, I} = exec:run("trap '' SIGTERM; sleep 30", [{kill_timeout, 1}, monitor]),
-    exec:stop(I),
-    ?receiveMatch({'DOWN', _, process, P, normal}, 5000).
+    %{ok, _OldDebug} = exec:debug(3),
+    {ok, P2, I2} = exec:run("trap 'echo Got signal' SIGTERM; sleep 15", [{kill_timeout, 1}, stdout, monitor]),
+    timer:sleep(200),
+    exec:stop(I2),
+    timer:sleep(50),
+    %exec:debug(_OldDebug),
+    ?receiveMatch({'DOWN', I2, process, P2, normal}, 5000).
 
 test_setpgid() ->
     % Cmd given as string
@@ -1213,7 +1251,7 @@ test_setpgid() ->
 test_pty() ->
     ?assertMatch({error,[{exit_status,256},{stdout,[<<"not a tty\n">>]}]},
         exec:run("tty", [stdin, stdout, sync])),
-    ?assertMatch({ok,[{stdout,[<<"/dev/pts/", _/binary>>]}]},
+    ?assertMatch({ok,[{stdout,[<<"/dev/", _/binary>>]}]},
         exec:run("tty", [stdin, stdout, pty, sync])),
     {ok, P, I} = exec:run("/bin/bash --norc -i", [stdin, stdout, pty, monitor]),
     exec:send(I, <<"echo ok\n">>),

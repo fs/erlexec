@@ -1,36 +1,41 @@
 # erlexec #
 
+[![Build Status](https://travis-ci.org/saleyn/erlexec.svg?branch=master)](https://travis-ci.org/saleyn/erlexec)
+
 Execute and control OS processes from Erlang/OTP.
 
-This project implements a C++ port program and Erlang application
+This project implements an Erlang application with a C++ port program
 that gives light-weight Erlang processes fine-grain control over
 execution of OS processes.
 
-It makes possible for an Erlang process to start, stop an OS process,
-send POSIX signals, know process IDs of a started OS process, set up
-a monitor or link to it, run interactive commands with pseudo
-terminals. This application provides better control
+The following features are supported:
+
+* Start/stop OS commands and get their OS process IDs.
+* Manage/monitor externally started OS processes.
+* Execute OS processes synchronously and asynchronously.
+* Setting OS command's working directory, environment, process group, effective user, process priority.
+* Provide custom termination command for killing a process or relying on
+  default SIGTERM/SIGKILL behavior. Specifying custom timeout for SIGKILL
+  after the termination command or SIGTERM was executed.
+* Terminate all processes beloging to a process group
+* Link Erlang processes to OS processes (via intermediate Erlang Pids that are linked
+  to an associated OS process).
+* Monitor termination of OS processes.
+* Kill processes belonging to an OS process group at process exit.
+* Communicate with an OS process via its STDIN.
+* Redirect STDOUT and STDERR of an OS process to a file, erlang process, or a custom function.
+  When redirected to a file, the file can be open in append/truncate mode, and given creation
+  access mask.
+* Run interactive processes with psudo-terminal pty support.
+* Execute OS processes under different user credentials (using Linux capabilities).
+* Perform proper cleanup of OS child processes at port program termination time.
+
+This application provides significantly better control
 over OS processes than built-in `erlang:open_port/2` command with a
 `{spawn, Command}` option, and performs proper OS child process cleanup
 when the emulator exits. 
 
 See http://saleyn.github.com/erlexec for more information.
-
-## *** HELP WANTED! *** ##
-
-There is a portability issue with a call to `sigwaitinfo(2)` that is
-missing on `Mac OS X` (example is describeed in 
-[this](https://github.com/saleyn/erlexec/issues/73) issue.  I don't
-have a Mac, so cannot implement/test the solution. Essentially there
-are two ways to approach this:
-
-* Use `kqueue` and implement `EVFILT_SIGNAL` handling (see example in
-  [this](https://people.freebsd.org/~jlemon/papers/kqueue.pdf) paper).
-* Block all signals in the main thread and create another one that
-  will set a suitable signal mask, and relay events to the main
-  thread's `select(3)` loop through a pipe.
-
-Contact the author if interested to help.
 
 ## SUPPORTED OS's ##
 Linux, Solaris, MacOS X
@@ -56,6 +61,9 @@ OS-specific libcap-dev installation instructions:
 ```
 $ git clone git@github.com:saleyn/erlexec.git
 $ make
+
+# NOTE: for enabling optimized build of exec-port, do the following instead:
+$ OPTIMIZE=true make
 ```
 
 ## LICENSE ##

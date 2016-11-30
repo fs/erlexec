@@ -6,10 +6,10 @@ TARBALL = $(PROJECT)-$(VSN)
 
 DIALYZER = dialyzer
 REBAR   := $(shell which rebar3 2>/dev/null)
-REBAR   := $(if $(REBAR),$(REBAR),$(which rebar 2>/dev/null))
+REBAR   := $(if $(REBAR),$(REBAR),$(shell which rebar 2>/dev/null))
 
 ifeq (,$(REBAR))
-$(error rebar or rebar3 not found!)
+$(error rebar and rebar3 not found!)
 endif
 
 .PHONY : all clean test docs doc clean-docs github-docs dialyzer
@@ -17,8 +17,11 @@ endif
 all:
 	@$(REBAR) compile
 
-clean path:
+clean:
 	@$(REBAR) $@
+
+path:
+	@echo $(shell $(REBAR) $@)
 
 docs: doc ebin clean-docs
 	@$(REBAR) edoc skip_deps=true
@@ -30,7 +33,7 @@ test:
 	@$(REBAR) eunit
 
 publish:
-	$(REBAR) hex publish
+	$(REBAR) hex cut
 
 clean-docs:
 	rm -f doc/*.{css,html,png} doc/edoc-info
